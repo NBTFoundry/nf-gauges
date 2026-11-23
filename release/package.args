@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: MPL-2.0
+# The package description for tools/package.py (NBTFoundry/manager): one argument
+# per line. `make package` and the release workflow both use it; they add the
+# version, sequence, key, output and executable. Bridge 1.6: an ordinary QNX
+# program built with the NBT toolchain (no runner); it draws on the manager's
+# surface (show) and turns pages with the controller. Optional: iDrive's car
+# data (the names src/sources.cpp reads, in that order), definition files
+# (`files`: CSV, README "Definition files"), live settings and a status line.
+--app
+gauges
+--compat
+nbt_6.5_armv7
+--bridge
+1.6
+--bridge-uses
+show,controller
+--bridge-optional
+status,live-settings,car-data,files
+--bridge-cds
+engine.RPMSpeed,engine.temperature,engine.torque,driving.acceleratorPedal,driving.speedActual,sensors.temperatureExterior,driving.acceleration,driving.steeringWheel,driving.gear,driving.mode
+--bridge-files
+csv|1|4
+--setting
+source|Data source|auto|auto,dme,cardata,demo
+--setting
+units|Units|metric|metric,imperial
+--setting
+lambda|Lambda as|lambda|lambda,afr
+--setting
+boost_scale|Boost gauge top|2bar|1bar,1-5bar,2bar,2-5bar,3bar
+--setting
+drivetrain|Drivetrain|auto|auto,rwd,xdrive
+--setting
+debug_log|Debug log|off|off,on
+# What the phone app shows before an install (NBT Manager's PROTOCOL.md,
+# "Package information").
+--property
+Project|NBTFoundry nf-gauges
+--property
+Licence|MPL-2.0; LVGL MIT; Montserrat OFL-1.1
+--text
+Live engine gauges: boost, lambda, ignition timing and per-cylinder corrections, fuel pressure, temperatures.
+--text
+On a diesel, the particulate filter. The transmission: gear, wheel speeds and slip, drivetrain, torque and power curves.
+--text
+Reads the engine computer (DME) through the car's gateway, read-only, as a diagnostic tester does.
+--text
+iDrive's own car data fills in what the DME does not give.
+--text=
+--text
+Do not interact with it while driving.
+--text=
+--text
+Source, licences and notices: https://github.com/NBTFoundry/nf-gauges
