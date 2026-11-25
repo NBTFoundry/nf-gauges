@@ -54,7 +54,9 @@ curves), BACK to close.
 - **DME via the gateway** (HSFZ, UDS, read-only): the standard OBD values
   (`22 F4xx`), batched; anything else from definition files. Through NBT
   Manager's diagnostics (bridge 1.8) for the ECUs the package declares (12,
-  13, 18, 19, 29); on its own tester connection when they are not offered.
+  13, 18, 19, 29); on its own tester connection when they are not offered,
+  to the gateway in `/var/opt/hmi/data/ID5/gateway-ip.txt` when other
+  diagnostic tools on the head unit are set to one.
 - **iDrive car data**: rpm, temperatures, torque, speed, acceleration, steering,
   gear, drive mode. Fills in when the DME is not reachable.
 - **Demo**: a simulated drive.

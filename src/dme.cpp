@@ -349,9 +349,6 @@ private:
         if (!find_gateway(fixed_gateway, extra, diag_port, &gateway)) {
             return false;
         }
-        if (!(fixed_gateway && *fixed_gateway)) {
-            gateway.port = static_cast<uint16_t>(diag_port);
-        }
         state(DmeStatus::kConnecting);
         link_.set_tester(kTesters[tester_index_]);
         if (!link_.open(gateway, 2000)) {
@@ -399,6 +396,7 @@ private:
             return false;
         }
         *out = found[0];
+        out->port = static_cast<uint16_t>(diag_port); // it answered on the UDP port
         char ip[16];
         format_ip(out->ip, ip, sizeof(ip));
         nbt::app::log_info("dme: gateway %s (address %02x, VIN %s)", ip, out->ident.address,
@@ -410,15 +408,33 @@ private:
         return true;
     }
 
+    // The gateway other diagnostic tools on the head unit are set to, if any:
+    // the first word of /var/opt/hmi/data/ID5/gateway-ip.txt.
+    static bool shared_gateway(char *out, size_t size) {
+        const char *path = getenv("NBT_GAUGES_GATEWAY_FILE"); // tests
+        FILE *file = fopen(path && *path ? path : "/var/opt/hmi/data/ID5/gateway-ip.txt", "r");
+        char line[64] = "", word[48] = "";
+        const bool read = file && fgets(line, sizeof(line), file) != NULL;
+        if (file) {
+            fclose(file);
+        }
+        return read && sscanf(line, " %47s", word) == 1 &&
+               snprintf(out, size, "%s", word) < static_cast<int>(size);
+    }
+
     bool known_gateway(int diag_port, Gateway *out) {
-        const char *known = getenv("NBT_GAUGES_KNOWN_GATEWAY"); // tests; empty: none
+        char shared[48];
+        const bool from_file = shared_gateway(shared, sizeof(shared));
+        const char *known = from_file ? shared : getenv("NBT_GAUGES_KNOWN_GATEWAY"); // tests
         if (!known) {
             known = kKnownGateway;
         }
         if (!*known || !parse_address(known, out)) {
             return false;
         }
-        out->port = static_cast<uint16_t>(diag_port);
+        if (!strchr(known, ':')) {
+            out->port = static_cast<uint16_t>(diag_port);
+        }
         HsfzLink probe;
         if (!probe.open(*out, 1500)) {
             return false;

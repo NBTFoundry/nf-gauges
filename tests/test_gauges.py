@@ -176,6 +176,21 @@ class GatewayTest(unittest.TestCase):
         app.wait(r"dme: 12 f40b answers: c8")
         self.assertEqual(app.stop(), 0)
 
+    def test_the_gateway_other_tools_are_set_to_comes_first(self):
+        # /var/opt/hmi/data/ID5/gateway-ip.txt, which other diagnostic tools
+        # on the head unit read, names the gateway when it is set.
+        gw = self.gateway()
+        shared = self.tmp / "gateway-ip.txt"
+        shared.write_text(f"127.0.0.1:{gw.port}\n")
+        env = {"NBT_LAUNCH": "user", "DISPLAY": self.display, "LIBGL_ALWAYS_SOFTWARE": "1",
+               "NBT_DATA_DIR": str(self.data), "NBT_FILES_DIR": str(self.files),
+               "NBT_GAUGES_KNOWN_GATEWAY": "", "NBT_GAUGES_GATEWAY_FILE": str(shared)}
+        app = App(env)
+        self.addCleanup(lambda: app.proc.poll() is None and app.proc.kill())
+        app.wait(r"dme: gateway 127\.0\.0\.1 answers on its diagnostic port")
+        app.wait(r"dme: 12 f40b answers: c8")
+        self.assertEqual(app.stop(), 0)
+
     def test_reads_one_value_per_request_when_batching_is_refused(self):
         gw = self.gateway(batch=False)
         app = self.start(gw, discover=False)
