@@ -9,6 +9,7 @@
 
 #include "hsfz_link.hpp"
 #include "nbt/app/clock.hpp"
+#include "nbt/app/diag.hpp"
 #include "nbt/app/log.hpp"
 #include "obd.hpp"
 
@@ -173,6 +174,10 @@ public:
           item_count_(0), batch_count_(0), batch_bytes_(0), baro_(kStandardAtmosphere),
           reference_torque_(0), slow_next_(0) {
         memset(def_channel_, 0, sizeof(def_channel_));
+        // NBT Manager's diagnostics (bridge 1.8 `diag`) when it grants them;
+        // otherwise our own tester connection to the gateway.
+        manager_ = diag_.init();
+        manager_error_[0] = '\0';
     }
 
     // Whether to keep going (false: stop asked or the user turned it off).
@@ -240,7 +245,8 @@ public:
     HsfzLink::Result ask(uint8_t ecu, const uint8_t *req, size_t n, uint8_t *answer,
                          size_t *answer_size) {
         const HsfzLink::Result r =
-            link_.request(ecu, req, n, answer, 512, answer_size, kRequestTimeoutMs);
+            manager_ ? via_manager(ecu, req, n, answer, answer_size)
+                     : link_.request(ecu, req, n, answer, 512, answer_size, kRequestTimeoutMs);
         pthread_mutex_lock(mutex_);
         ++status_->requests;
         if (r == HsfzLink::kOk) {
@@ -257,9 +263,29 @@ public:
             nbt::app::log_debug("dme: %02x <- %s -> %s", ecu, q,
                                 r == HsfzLink::kOk        ? a
                                 : r == HsfzLink::kTimeout ? "(no answer)"
-                                                          : link_.error());
+                                                          : error());
         }
         return r;
+    }
+
+    // A request through NBT Manager, its outcome as the link's.
+    HsfzLink::Result via_manager(uint8_t ecu, const uint8_t *req, size_t n, uint8_t *answer,
+                                 size_t *answer_size) {
+        typedef nbt::app::Diag D;
+        const D::Status s = diag_.request(ecu, req, n, answer, 512, answer_size, kRequestTimeoutMs);
+        const char *why = s == D::kRefused   ? "not in this package's diagnostics policy"
+                          : s == D::kNoRoute ? "NBT Manager reaches no gateway"
+                          : s == D::kBusy    ? "another tester holds the gateway"
+                                             : "NBT Manager's diagnostics failed";
+        snprintf(manager_error_, sizeof(manager_error_), "%s", why);
+        return s == D::kOk        ? HsfzLink::kOk
+               : s == D::kTimeout ? HsfzLink::kTimeout
+               : s == D::kRefused ? HsfzLink::kRefused
+                                  : HsfzLink::kBroken;
+    }
+
+    const char *error() const {
+        return manager_ ? manager_error_ : link_.error();
     }
 
     // ReadDataByIdentifier; the record (after 62 hi lo) in `record`.
@@ -295,25 +321,17 @@ public:
         for (int i = 0; i < defs_.count; ++i) {
             def_channel_[defs_.defs[i].channel] = true;
         }
-        Gateway gateway;
-        if (!find_gateway(fixed_gateway, extra, diag_port, &gateway)) {
+        if (manager_) {
+            state(DmeStatus::kConnecting);
+            update([](DmeStatus *s) {
+                ++s->reconnects;
+                s->tester = 0xF4; // the manager's
+                snprintf(s->gateway, sizeof(s->gateway), "NBT Manager");
+            });
+            nbt::app::log_info("dme: through NBT Manager's diagnostics");
+        } else if (!connect(fixed_gateway, extra, diag_port)) {
             return;
         }
-        if (!(fixed_gateway && *fixed_gateway)) {
-            gateway.port = static_cast<uint16_t>(diag_port);
-        }
-        state(DmeStatus::kConnecting);
-        link_.set_tester(kTesters[tester_index_]);
-        if (!link_.open(gateway, 2000)) {
-            state(DmeStatus::kWaiting, link_.error());
-            pause(2000);
-            return;
-        }
-        update([&](DmeStatus *s) {
-            ++s->reconnects;
-            s->tester = link_.tester();
-        });
-        nbt::app::log_info("dme: connected to the gateway, tester %02x", link_.tester());
         const bool ok = identify() && plan() && poll();
         clear_batch();
         link_.close();
@@ -326,6 +344,29 @@ public:
     uint32_t generation_seen_;
 
 private:
+    bool connect(const char *fixed_gateway, const char *extra, int diag_port) {
+        Gateway gateway;
+        if (!find_gateway(fixed_gateway, extra, diag_port, &gateway)) {
+            return false;
+        }
+        if (!(fixed_gateway && *fixed_gateway)) {
+            gateway.port = static_cast<uint16_t>(diag_port);
+        }
+        state(DmeStatus::kConnecting);
+        link_.set_tester(kTesters[tester_index_]);
+        if (!link_.open(gateway, 2000)) {
+            state(DmeStatus::kWaiting, link_.error());
+            pause(2000);
+            return false;
+        }
+        update([&](DmeStatus *s) {
+            ++s->reconnects;
+            s->tester = link_.tester();
+        });
+        nbt::app::log_info("dme: connected to the gateway, tester %02x", link_.tester());
+        return true;
+    }
+
     bool find_gateway(const char *fixed, const char *extra, int diag_port, Gateway *out) {
         if (fixed && *fixed) {
             if (!parse_address(fixed, out)) {
@@ -396,9 +437,9 @@ private:
         if (r == HsfzLink::kTimeout) {
             snprintf(what, sizeof(what), "%s: the DME did not answer", during);
         } else {
-            snprintf(what, sizeof(what), "%s: %s", during, link_.error());
+            snprintf(what, sizeof(what), "%s: %s", during, error());
         }
-        if (r == HsfzLink::kRefused && link_.refusal() == kHsfzBadTester) {
+        if (!manager_ && r == HsfzLink::kRefused && link_.refusal() == kHsfzBadTester) {
             tester_index_ = (tester_index_ + 1) % static_cast<int>(sizeof(kTesters));
         }
         state(DmeStatus::kWaiting, what);
@@ -574,7 +615,7 @@ private:
     }
 
     void clear_batch() {
-        if (!link_.is_open()) {
+        if (!manager_ && !link_.is_open()) {
             return;
         }
         const uint8_t req[4] = {0x2C, 0x03, kDynamicDid >> 8, kDynamicDid & 0xFF};
@@ -627,7 +668,9 @@ private:
     // this car, or asleep. Its values are left out after a few tries; the
     // DME's reading goes on.
     bool missed(const Item &head, HsfzLink::Result r) {
-        const bool absent = r == HsfzLink::kRefused && link_.refusal() == kHsfzBadTarget;
+        // Through the manager, a refusal: not in the package's policy.
+        const bool absent =
+            r == HsfzLink::kRefused && (manager_ || link_.refusal() == kHsfzBadTarget);
         if (head.ecu == kDmeAddress || (r != HsfzLink::kTimeout && !absent)) {
             return false;
         }
@@ -639,7 +682,9 @@ private:
             if (absent || ++it.misses >= kMaxMisses) {
                 it.dead = true;
                 nbt::app::log_info("dme: %02x %04x: %s: left out", it.ecu, it.did,
-                                   absent ? "the gateway does not know this ECU" : "no answer");
+                                   !absent    ? "no answer"
+                                   : manager_ ? "not in this package's diagnostics policy"
+                                              : "the gateway does not know this ECU");
                 if (it.def >= 0) {
                     update([](DmeStatus *s) { ++s->defined_failed; });
                 }
@@ -838,6 +883,9 @@ private:
     uint32_t *generation_;
     DmeStatus *status_;
     HsfzLink link_;
+    nbt::app::Diag diag_;
+    bool manager_;
+    char manager_error_[64];
     int tester_index_;
     DefinitionSet defs_;
     bool def_channel_[kChannelCount];

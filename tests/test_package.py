@@ -46,7 +46,8 @@ class PackageTest(unittest.TestCase):
             out = subprocess.run([str(verify), str(tmp / "gauges-0.1.0.nbt"), str(public), "gauges",
                                   "nbt_6.5_armv7"], check=True, capture_output=True, text=True).stdout
             self.assertIn("app=gauges\n", out)
-            self.assertIn("bridge=1.6\n", out)
+            self.assertIn("bridge=1.8\n", out)
+            self.assertIn("bridge-diag=12:read,13:read,18:read,19:read,29:read\n", out)
             self.assertIn("bridge-uses=show,controller\n", out)
             self.assertIn("bridge-files=csv|1|4\n", out)
             # The car-data names are those src/sources.cpp reads.

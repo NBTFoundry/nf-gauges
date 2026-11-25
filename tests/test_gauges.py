@@ -2,7 +2,8 @@
 """The desktop build as NBT Manager starts it: the health check without a
 window, then user launches under Xvfb reading a fake gateway (fake_gateway.py):
 the search, the identification, the standard values, batched reading,
-definition files, the alive check, a refused tester address; and the demo."""
+definition files, the alive check, a refused tester address; NBT Manager's
+diagnostics (bridge 1.8 `diag`) in place of the gateway; and the demo."""
 
 import os
 from pathlib import Path
@@ -10,7 +11,10 @@ import re
 import select
 import shutil
 import signal
+import socket
+import struct
 import subprocess
+import threading
 import tempfile
 import time
 import unittest
@@ -41,10 +45,14 @@ def xvfb():
 class App:
     """The application, its log (standard error) read by line."""
 
-    def __init__(self, env, args=(), pass_fds=()):
+    def __init__(self, env, args=(), pass_fds=(), diag_fd=None):
         full = {k: v for k, v in os.environ.items() if not k.startswith("NBT_")}
         full.update(env)
-        self.proc = subprocess.Popen([str(APP), *args], stdout=subprocess.DEVNULL,
+        command = [str(APP), *args]
+        if diag_fd is not None:  # as descriptor 10, as the manager gives it
+            command = ["bash", "-c", f'exec "$0" "$@" 10<&{diag_fd} {diag_fd}<&-', *command]
+            pass_fds = (*pass_fds, diag_fd)
+        self.proc = subprocess.Popen(command, stdout=subprocess.DEVNULL,
                                      stderr=subprocess.PIPE, env=full, pass_fds=pass_fds)
         self.lines, self.seen, self.buf = [], [], b""
 
@@ -223,6 +231,52 @@ class GatewayTest(unittest.TestCase):
         self.assertEqual(set(dsc), {b"\x22\x4d\x10"})
         self.assertEqual(sum(1 for _, target, _ in gw.requests if target == 0x19), 3)
         self.assertTrue(all(target == 0x12 for _, target, uds in gw.requests if uds[0] == 0x2C))
+
+    def test_through_the_managers_diagnostics_when_granted(self):
+        # The manager's side of NBT_DIAG_FD=10: requests to the ECUs of the
+        # package's policy answered (from the fake car), others refused.
+        (self.files / "chassis.csv").write_text(
+            "id,label,unit,ecu,did,pos,type,mul,div,add,min,max\n"
+            "wheel_fl,,,29,4D10,1,u16,1,100,0,,\n"
+            "front_share,,,19,4D20,1,u8,100,255,0,,\n")
+        gw = self.gateway()
+        ours, theirs = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
+        self.addCleanup(ours.close)
+        asked = []
+
+        def manager():
+            while True:
+                try:
+                    data = ours.recv(2048)
+                except OSError:
+                    return
+                if not data:
+                    return
+                ecu, uds = data[1], data[6:]
+                asked.append((ecu, uds))
+                answer = gw.answer(ecu, uds) if ecu in (0x12, 0x29) else None
+                status = 0 if answer else 2 if ecu not in (0x12, 0x29) else 1
+                ours.send(b"\x81" + bytes([ecu]) + data[2:4] + bytes([status, 1]) +
+                          (answer or b""))
+
+        threading.Thread(target=manager, daemon=True).start()
+        env = {"NBT_LAUNCH": "user", "DISPLAY": self.display, "LIBGL_ALWAYS_SOFTWARE": "1",
+               "NBT_DATA_DIR": str(self.data), "NBT_FILES_DIR": str(self.files),
+               "NBT_GAUGES_KNOWN_GATEWAY": "", "NBT_DIAG_FD": "10"}
+        app = App(env, diag_fd=theirs.fileno())
+        theirs.close()
+        self.addCleanup(lambda: app.proc.poll() is None and app.proc.kill())
+        app.wait(r"dme: through NBT Manager's diagnostics")
+        app.wait(r"dme: diagnostic index 00 00 2b 01")
+        app.wait(r"dme: 12 f40b answers: c8")
+        app.wait(r"dme: 29 4d10 answers: 13 88")
+        app.wait(r"dme: 19 4d20: not in this package's diagnostics policy: left out")
+        app.wait(r"dme: \d+ fast values in one read")
+        self.assertEqual(app.stop(), 0)
+        # Nothing of our own on the gateway; a refused ECU asked once.
+        self.assertEqual(gw.requests, [])
+        self.assertEqual(sum(1 for ecu, _ in asked if ecu == 0x19), 1)
+        self.assertEqual(asked[-1], (0x12, b"\x2c\x03\xf3\x00"))
 
     def test_a_diesel_shows_dpf(self):
         gw = self.gateway(diesel=True)

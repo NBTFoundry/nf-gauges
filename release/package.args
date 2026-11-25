@@ -1,21 +1,25 @@
 # SPDX-License-Identifier: MPL-2.0
 # The package description for tools/package.py (NBTFoundry/manager): one argument
 # per line. `make package` and the release workflow both use it; they add the
-# version, sequence, key, output and executable. Bridge 1.6: an ordinary QNX
+# version, sequence, key, output and executable. Bridge 1.8: an ordinary QNX
 # program built with the NBT toolchain (no runner); it draws on the manager's
 # surface (show) and turns pages with the controller. Optional: iDrive's car
 # data (the names src/sources.cpp reads, in that order), definition files
-# (`files`: CSV, README "Definition files"), live settings and a status line.
+# (`files`: CSV, README "Definition files"), live settings, a status line and
+# the manager's diagnostics, read-only: DME, second DME, gearbox, transfer case
+# and DSC (`diag`; without it, its own tester connection to the gateway).
 --app
 gauges
 --compat
 nbt_6.5_armv7
 --bridge
-1.6
+1.8
 --bridge-uses
 show,controller
 --bridge-optional
-status,live-settings,car-data,files
+status,live-settings,car-data,files,diag
+--bridge-diag
+12:read,13:read,18:read,19:read,29:read
 --bridge-cds
 engine.RPMSpeed,engine.temperature,engine.torque,driving.acceleratorPedal,driving.speedActual,sensors.temperatureExterior,driving.acceleration,driving.steeringWheel,driving.gear,driving.mode
 --bridge-files
