@@ -115,10 +115,14 @@ class GatewayTest(unittest.TestCase):
         self.x.wait(timeout=5)
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def start(self, gateway, discover=True, **settings):
+    def start(self, gateway, discover=True, known=False, **settings):
         env = {"NBT_LAUNCH": "user", "DISPLAY": self.display, "LIBGL_ALWAYS_SOFTWARE": "1",
-               "NBT_DATA_DIR": str(self.data), "NBT_FILES_DIR": str(self.files)}
-        if discover:
+               "NBT_DATA_DIR": str(self.data), "NBT_FILES_DIR": str(self.files),
+               "NBT_GAUGES_KNOWN_GATEWAY": ""}
+        if known:
+            env["NBT_GAUGES_KNOWN_GATEWAY"] = "127.0.0.1"
+            env["NBT_GAUGES_DIAG_PORT"] = str(gateway.port)
+        elif discover:
             env["NBT_GAUGES_DISCOVERY"] = f"127.0.0.1:{gateway.ident_port}"
             env["NBT_GAUGES_DIAG_PORT"] = str(gateway.port)
         else:
@@ -154,6 +158,15 @@ class GatewayTest(unittest.TestCase):
         self.assertEqual(gw.requests[-1][2], b"\x2c\x03\xf3\x00")
         batched = sum(1 for _, _, uds in gw.requests if uds == b"\x22\xf3\x00")
         self.assertGreater(batched, 10)
+
+    def test_the_known_gateway_address_before_the_broadcast(self):
+        # The car blocks the UDP broadcast on the gateway link: the usual
+        # address is tried on its TCP port first (here 127.0.0.1).
+        gw = self.gateway()
+        app = self.start(gw, discover=False, known=True)
+        app.wait(r"dme: gateway 127\.0\.0\.1 answers on its diagnostic port")
+        app.wait(r"dme: 12 f40b answers: c8")
+        self.assertEqual(app.stop(), 0)
 
     def test_reads_one_value_per_request_when_batching_is_refused(self):
         gw = self.gateway(batch=False)

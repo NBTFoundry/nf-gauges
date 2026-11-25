@@ -3,6 +3,7 @@
 
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -13,6 +14,9 @@
 
 namespace gauges {
 namespace {
+
+// The central gateway's usual address on the head unit's link to it.
+const char kKnownGateway[] = "169.254.21.3";
 
 enum {
     kMaxItems = 64,
@@ -292,7 +296,7 @@ public:
             def_channel_[defs_.defs[i].channel] = true;
         }
         Gateway gateway;
-        if (!find_gateway(fixed_gateway, extra, &gateway)) {
+        if (!find_gateway(fixed_gateway, extra, diag_port, &gateway)) {
             return;
         }
         if (!(fixed_gateway && *fixed_gateway)) {
@@ -322,7 +326,7 @@ public:
     uint32_t generation_seen_;
 
 private:
-    bool find_gateway(const char *fixed, const char *extra, Gateway *out) {
+    bool find_gateway(const char *fixed, const char *extra, int diag_port, Gateway *out) {
         if (fixed && *fixed) {
             if (!parse_address(fixed, out)) {
                 state(DmeStatus::kWaiting, "the gateway address is not ip[:port]");
@@ -333,6 +337,12 @@ private:
             return true;
         }
         state(DmeStatus::kSearching);
+        // The car's packet filter on the head unit's gateway link lets TCP 6801
+        // through but not the UDP identification broadcast: the usual gateway
+        // address first, by its TCP port, then the broadcast (the bench).
+        if (known_gateway(diag_port, out)) {
+            return true;
+        }
         Gateway found[4];
         char searched[160];
         const int n = hsfz_discover(found, 4, 1500, extra, searched, sizeof(searched));
@@ -356,6 +366,27 @@ private:
             snprintf(s->gateway, sizeof(s->gateway), "%s", ip);
             snprintf(s->vin, sizeof(s->vin), "%s", out->ident.vin);
         });
+        return true;
+    }
+
+    bool known_gateway(int diag_port, Gateway *out) {
+        const char *known = getenv("NBT_GAUGES_KNOWN_GATEWAY"); // tests; empty: none
+        if (!known) {
+            known = kKnownGateway;
+        }
+        if (!*known || !parse_address(known, out)) {
+            return false;
+        }
+        out->port = static_cast<uint16_t>(diag_port);
+        HsfzLink probe;
+        if (!probe.open(*out, 1500)) {
+            return false;
+        }
+        probe.close();
+        char ip[16];
+        format_ip(out->ip, ip, sizeof(ip));
+        nbt::app::log_info("dme: gateway %s answers on its diagnostic port", ip);
+        update([&](DmeStatus *s) { snprintf(s->gateway, sizeof(s->gateway), "%s", ip); });
         return true;
     }
 

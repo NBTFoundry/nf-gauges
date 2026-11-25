@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 # Car test: Gauges
 
-Packages: `gauges-0.0.5.nbt` (install), `gauges-0.0.6.nbt` (update),
-`gauges-0.0.5-SHA256SUMS.txt`; NBT Manager 0.3.1 or later. Parked, about 30
+Packages: `gauges-0.0.7.nbt` (install), `gauges-0.0.8.nbt` (update),
+`gauges-0.0.7-SHA256SUMS.txt`; NBT Manager 0.3.1 or later. A Gauges from Get apps (0.1.0) is newer: uninstall it first. Parked, about 30
 minutes, phone only, nothing in the OBD port.
 
 Main question: does the gateway answer the head unit's own link? The
@@ -12,7 +12,7 @@ CONNECTION page shows it.
 
 | # | Do | Look for |
 | --- | --- | --- |
-| A0 | Phone: Library › open `gauges-0.0.5.nbt` | **Project: NBTFoundry nf-gauges**, **Licence: MPL-2.0; LVGL MIT; Montserrat OFL-1.1**, then the text ending with the repository's address |
+| A0 | Phone: Library › open `gauges-0.0.7.nbt` | **Project: NBTFoundry nf-gauges**, **Licence: MPL-2.0; LVGL MIT; Montserrat OFL-1.1**, then the text ending with the repository's address |
 | A1 | Phone: Car › install Gauges; approve on the car | The health check passes (about 10 s), "Installed" |
 | A2 | Car: hold the push on **gauges** › settings | 6 settings: Data source, Units, Lambda as, Boost gauge top, Drivetrain, Debug log |
 | A3 | Set **Debug log: on** | Kept when you leave and come back |
@@ -23,7 +23,7 @@ CONNECTION page shows it.
 | --- | --- | --- |
 | B1 | Start **gauges** | The ENGINE page: three round gauges, a status at the top right |
 | B2 | Turn the controller to the last page, **CONNECTION**; wait 20 s. **Take a photo** | The lines DME, GATEWAY, DME INDEX, STANDARD VALUES, LAST PROBLEM, SEARCHED, IDRIVE CAR DATA |
-| B3 | Read the status at the top right | One of: **DME nn HZ** (green: the DME answers), **IDRIVE CAR DATA** (amber), **SEARCHING** (no gateway answered), **CONNECTING** (a gateway, but no DME yet) |
+| B3 | Read the status at the top right | One of: **DME nn HZ** (green: the DME answers), **IDRIVE CAR DATA** (amber), **SEARCHING** (no gateway answered), **CONNECTING** (a gateway, but no DME yet). GATEWAY on CONNECTION: **169.254.21.3** when the gateway answers on its TCP port |
 | B4 | If **DME**: the TEMPERATURES page | Coolant and oil close to the car's own (oil may be `--` if the DME does not give it) |
 | B5 | The fourth page | A petrol car: **IGNITION** (timing gauge). A diesel: **DPF** (soot load gauge, REGENERATION, PRESSURE DROP, FILTER INLET/OUTLET...). Note which, and **take a photo** if DPF |
 | B6 | The fifth page, **TRANSMISSION** | The car drawn from above; GEAR shows **P** (and the drive mode, e.g. COMFORT); wheel speeds `--` and a note about definition files (none installed); DRIVE: REAR-WHEEL DRIVE (Drivetrain: auto, no definition file) |
@@ -48,7 +48,7 @@ CONNECTION page shows it.
 
 | # | Do | Look for |
 | --- | --- | --- |
-| D1 | Phone: update to `gauges-0.0.6.nbt`; approve | Health check passes; settings and the last page shown are kept |
+| D1 | Phone: update to `gauges-0.0.8.nbt`; approve | Health check passes; settings and the last page shown are kept |
 
 ## What to send back
 
