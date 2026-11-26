@@ -145,8 +145,9 @@ void demo_values(uint64_t t_ms, Store *store, uint64_t now_ms, bool diesel) {
     } else if (t < 12.0f) {
         const float u = t - 4.0f;
         const float gear = u < 4.5f ? u / 4.5f : (u - 4.5f) / 3.5f;
-        rpm = u < 4.5f ? 2000.0f + 4600.0f * ease(gear) : 4300.0f + 2300.0f * ease(gear);
-        load = clampf(u * 1.5f, 0.0f, 1.0f);
+        // From just above idle to 7000 rpm, twice: the whole curve is drawn.
+        rpm = u < 4.5f ? 1000.0f + 6000.0f * ease(gear) : 4500.0f + 2500.0f * ease(gear);
+        load = clampf(u * 8.0f, 0.0f, 1.0f);
         pedal = 100.0f;
         speed = 135.0f * (1.0f - expf(-u / 4.5f)) / (1.0f - expf(-8.0f / 4.5f));
         along = 4.6f * expf(-u / 6.0f);
@@ -158,7 +159,7 @@ void demo_values(uint64_t t_ms, Store *store, uint64_t now_ms, bool diesel) {
         }
     } else if (t < 15.0f) {
         const float u = (t - 12.0f) / 3.0f;
-        rpm = 6500.0f - 3800.0f * ease(u);
+        rpm = 7000.0f - 4300.0f * ease(u);
         load = 0.0f;
         pedal = 0;
         speed = 135.0f - 50.0f * ease(u);
@@ -209,12 +210,16 @@ void demo_values(uint64_t t_ms, Store *store, uint64_t now_ms, bool diesel) {
     store->set(kTrimShort, 1.5f * sinf(t * 2.0f), kDemo, now_ms);
     store->set(kTrimLong, -2.3f, kDemo, now_ms);
     store->set(kVoltage, 14.2f + 0.1f * sinf(t * 0.5f), kDemo, now_ms);
-    // A twin-turbo V8's full-load torque: building to 750 Nm by 1800 rpm,
-    // flat to 5600, then falling away (about 600 hp at the top).
-    const float full = rpm < 1800.0f   ? 450.0f + 300.0f * ease((rpm - 1000.0f) / 800.0f)
-                       : rpm < 5600.0f ? 750.0f
-                                       : 750.0f - 150.0f * clampf((rpm - 5600.0f) / 1400.0f, 0.0f, 1.0f);
-    const float torque = 15.0f + full * load;
+    // Full load as an M5's twin-turbo V8 (S63, F90) gives it: the turbos
+    // build to 750 Nm by 1800 rpm, flat to 5600, then 441 kW (600 PS) held to
+    // 6700 and a little less up to the limiter. The corner between the two is
+    // round, as on a dyno sheet.
+    const float held = 441000.0f * 60.0f / (2.0f * 3.14159265f * (rpm < 6700.0f ? rpm : 6700.0f));
+    const float knee = -30.0f * logf(expf(-750.0f / 30.0f) + expf(-held / 30.0f)); // the lower, softly
+    const float full = rpm < 1800.0f   ? 330.0f + (knee - 330.0f) * ease((rpm - 900.0f) / 900.0f)
+                       : rpm < 6700.0f ? knee
+                                       : knee * (1.0f - 0.12f * clampf((rpm - 6700.0f) / 500.0f, 0.0f, 1.0f));
+    const float torque = 15.0f + (full - 15.0f) * load;
     store->set(kTorque, torque, kDemo, now_ms);
     store->set(kSpeed, speed, kDemo, now_ms);
     // Corrections: a little knock on cylinders 2 and 5 during the pull.
