@@ -99,7 +99,7 @@ struct TransmissionView {
     // The torque and power curves.
     lv_obj_t *chart, *torque_legend, *power_legend, *torque_labels[3], *power_labels[3];
     lv_chart_series_t *torque_series, *power_series;
-    lv_obj_t *torque_dot, *power_dot, *now_text, *peak_text;
+    lv_obj_t *cursor, *torque_dot, *power_dot, *now_text, *peak_text;
     int chart_x, chart_y, chart_w, chart_h;
     float torque_max[kDynoBins]; // Nm, -1 for none yet
     float torque_top, power_top; // the axes' tops, display units
@@ -928,6 +928,9 @@ void build_dyno(lv_obj_t *page, int x, int w) {
     }
     lv_obj_t *rpm = label(page, g.fonts.tiny, kTextDim, "x1000 RPM");
     lv_obj_set_pos(rpm, t.chart_x + t.chart_w - g.width * 7 / 100, t.chart_y + t.chart_h + g.height * 45 / 1000);
+    // Where the engine is now: a line at its speed, a dot on it for each value.
+    t.cursor = shape(page, 0, t.chart_y, g.height >= 720 ? 2 : 1, t.chart_h, 0, kTextDim, 0, 0);
+    lv_obj_set_hidden(t.cursor, true);
     const int dot = g.height * 3 / 100;
     t.torque_dot = shape(page, 0, 0, dot, dot, LV_RADIUS_CIRCLE, kAccent, kBackground, 2);
     t.power_dot = shape(page, 0, 0, dot, dot, LV_RADIUS_CIRCLE, kPower, kBackground, 2);
@@ -1324,20 +1327,23 @@ void update_dyno(const UiInput &in) {
                  static_cast<double>(pv), g.units.imperial ? "hp" : "kW");
         const float f = clampf((rpm.value - kDynoFrom) / static_cast<float>((kDynoBins - 1) * kDynoStep), 0, 1);
         const int dot = lv_obj_get_width(t.torque_dot);
-        const int x = t.chart_x + static_cast<int>(f * static_cast<float>(t.chart_w - 1)) - dot / 2;
-        const int ty = t.chart_y + t.chart_h - 1 -
-                       static_cast<int>(clampf(tv / t.torque_top, 0, 1) * static_cast<float>(t.chart_h - 1)) - dot / 2;
-        const int py = t.chart_y + t.chart_h - 1 -
-                       static_cast<int>(clampf(pv / t.power_top, 0, 1) * static_cast<float>(t.chart_h - 1)) - dot / 2;
-        const bool inside = rpm.value >= kDynoFrom && tq.value > 0;
-        lv_obj_set_hidden(t.torque_dot, !inside);
-        lv_obj_set_hidden(t.power_dot, !inside);
+        const int x = t.chart_x + static_cast<int>(f * static_cast<float>(t.chart_w - 1));
+        const int th = static_cast<int>(clampf(tv / t.torque_top, 0, 1) * static_cast<float>(t.chart_h - 1));
+        const int ph = static_cast<int>(clampf(pv / t.power_top, 0, 1) * static_cast<float>(t.chart_h - 1));
+        const bool inside = rpm.value >= kDynoFrom;
+        lv_obj_set_hidden(t.cursor, !inside);
+        // A dot lying on the axis (overrun, idling) says nothing and covers the
+        // other one: the line alone then.
+        lv_obj_set_hidden(t.torque_dot, !inside || th < dot);
+        lv_obj_set_hidden(t.power_dot, !inside || ph < dot);
         if (inside) {
-            lv_obj_set_pos(t.torque_dot, x, ty);
-            lv_obj_set_pos(t.power_dot, x, py);
+            lv_obj_set_x(t.cursor, x);
+            lv_obj_set_pos(t.torque_dot, x - dot / 2, t.chart_y + t.chart_h - 1 - th - dot / 2);
+            lv_obj_set_pos(t.power_dot, x - dot / 2, t.chart_y + t.chart_h - 1 - ph - dot / 2);
         }
     } else {
         snprintf(text, sizeof(text), "%s", "--");
+        lv_obj_set_hidden(t.cursor, true);
         lv_obj_set_hidden(t.torque_dot, true);
         lv_obj_set_hidden(t.power_dot, true);
     }

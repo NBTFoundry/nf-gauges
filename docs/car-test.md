@@ -41,7 +41,7 @@ unit's own link? The CONNECTION page shows it.
 | C5 | **Data source: demo** | Status **DEMO**: the gauges sweep through a simulated drive |
 | C6 | **Data source: auto**, **Units: imperial**, **Lambda as: afr**, **Boost gauge top: 3bar** | psi and °F, lambda as about 14.7, the boost gauge to 45 psi |
 | C7 | TRANSMISSION page; turn the steering wheel to the **left**, about half a turn, then right | STEERING follows (**L** to the left), the drawn front wheels turn the same way; **take a photo** at full left. If L/R or the wheels go the wrong way, say so |
-| C8 | Still on TRANSMISSION, in P or N: blip the throttle to 3000 rpm and up to 4500 | TORQUE & POWER: two curves appear between idle and the highest rpm reached (low, no load), the dots follow the engine. Drive mode switch: the mode text follows (SPORT, COMFORT...) |
+| C8 | Still on TRANSMISSION, in P or N: blip the throttle to 3000 rpm and up to 4500 | TORQUE & POWER: two curves appear between idle and the highest rpm reached (low, no load), a line and its two dots follow the engine (the line alone at no load). Drive mode switch: the mode text follows (SPORT, COMFORT...) |
 | C9 | Settings › **Drivetrain: xdrive** (then back to **auto**) | The front shaft and axle appear on the car; DRIVE shows FRONT/REAR `--` without a definition file |
 | C10 | Turn through all seven pages, BACK | Each page draws without flicker; BACK closes Gauges |
 
