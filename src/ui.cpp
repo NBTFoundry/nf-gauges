@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "car_art.hpp"
+#include "plot.hpp"
 #include "lvgl.h"
 #include "nbt/app/log.hpp"
 
@@ -101,7 +102,10 @@ struct TransmissionView {
     bool has_steer;
     // The torque and power curves.
     lv_obj_t *chart, *torque_legend, *power_legend, *torque_labels[3], *power_labels[3];
-    lv_chart_series_t *torque_series, *power_series;
+    lv_draw_buf_t *plot_buf; // the two curves, drawn by plot_line
+    lv_obj_t *plot;
+    int plot_room;           // the image's margin around the chart, for the line's width
+    float line_width;
     lv_obj_t *cursor, *torque_dot, *power_dot, *now_text, *peak_text;
     int chart_x, chart_y, chart_w, chart_h;
     float torque_max[kDynoBins]; // Nm, -1 for none yet
@@ -899,20 +903,23 @@ void build_dyno(lv_obj_t *page, int x, int w) {
     lv_obj_set_clickable(t.chart, false);
     lv_obj_set_pos(t.chart, t.chart_x, t.chart_y);
     lv_obj_set_size(t.chart, t.chart_w, t.chart_h);
-    lv_chart_set_type(t.chart, LV_CHART_TYPE_LINE);
-    lv_chart_set_point_count(t.chart, kDynoShown);
+    // The chart is the grid; the curves are an image over it (plot.hpp).
+    lv_chart_set_type(t.chart, LV_CHART_TYPE_NONE);
     lv_chart_set_div_line_count(t.chart, 3, 7);
     lv_obj_set_style_line_color(t.chart, lv_color_hex(kTrack), LV_PART_MAIN);
     lv_obj_set_style_line_width(t.chart, 1, LV_PART_MAIN);
     lv_obj_set_style_line_opa(t.chart, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_line_width(t.chart, g.height / 150 > 2 ? g.height / 150 : 2, LV_PART_ITEMS);
-    lv_obj_set_style_line_rounded(t.chart, true, LV_PART_ITEMS);
-    lv_obj_set_style_width(t.chart, 0, LV_PART_INDICATOR);
-    lv_obj_set_style_height(t.chart, 0, LV_PART_INDICATOR);
-    t.torque_series = lv_chart_add_series(t.chart, lv_color_hex(kAccent), LV_CHART_AXIS_PRIMARY_Y);
-    t.power_series = lv_chart_add_series(t.chart, lv_color_hex(kPower), LV_CHART_AXIS_SECONDARY_Y);
-    lv_chart_set_all_values(t.chart, t.torque_series, LV_CHART_POINT_NONE);
-    lv_chart_set_all_values(t.chart, t.power_series, LV_CHART_POINT_NONE);
+    t.line_width = static_cast<float>(g.height) / 180.0f;
+    t.plot_room = static_cast<int>(ceilf(t.line_width)) + 2;
+    t.plot = NULL;
+    t.plot_buf = lv_draw_buf_create(static_cast<uint32_t>(t.chart_w + 2 * t.plot_room),
+                                    static_cast<uint32_t>(t.chart_h + 2 * t.plot_room), LV_COLOR_FORMAT_ARGB8888, 0);
+    if (t.plot_buf) {
+        plot_clear(t.plot_buf->data, static_cast<int>(t.plot_buf->header.h), static_cast<int>(t.plot_buf->header.stride));
+        t.plot = lv_canvas_create(page);
+        lv_canvas_set_draw_buf(t.plot, t.plot_buf);
+        lv_obj_set_pos(t.plot, t.chart_x - t.plot_room, t.chart_y - t.plot_room);
+    }
     // The axes' labels: torque on the left, power on the right, 0 to the top.
     for (int i = 0; i < 3; ++i) {
         const int y = t.chart_y + t.chart_h - (t.chart_h * i) / 2 - g.height * 17 / 1000;
@@ -1314,8 +1321,6 @@ void update_dyno(const UiInput &in) {
         if (ttop != t.torque_top || ptop != t.power_top) {
             t.torque_top = ttop;
             t.power_top = ptop;
-            lv_chart_set_axis_range(t.chart, LV_CHART_AXIS_PRIMARY_Y, 0, static_cast<int32_t>(ttop));
-            lv_chart_set_axis_range(t.chart, LV_CHART_AXIS_SECONDARY_Y, 0, static_cast<int32_t>(ptop));
             for (int i = 0; i < 3; ++i) {
                 snprintf(text, sizeof(text), "%.0f", static_cast<double>(ttop * static_cast<float>(i) / 2.0f));
                 lv_label_set_text(t.torque_labels[i], text);
@@ -1327,27 +1332,49 @@ void update_dyno(const UiInput &in) {
             snprintf(text, sizeof(text), "%s", "POWER  hp");
             lv_label_set_text(t.power_legend, text);
         }
+        // The points, in the image's pixels: every 200 rpm, each with what its
+        // two neighbours saw (1:2:1).
+        float xs[kDynoShown], torque_y[kDynoShown], power_y[kDynoShown];
+        bool have[kDynoShown];
+        const float span = static_cast<float>(t.chart_h - 1), room = static_cast<float>(t.plot_room);
         for (int k = 0; k < kDynoShown; ++k) {
             const int i = 2 * k;
             const float rpm = static_cast<float>(kDynoFrom + i * kDynoStep);
-            const bool have = t.torque_max[i] >= 0;
-            // The point and what its two neighbours saw, 1:2:1.
+            have[k] = t.torque_max[i] >= 0;
             float sum = 2 * t.torque_max[i], weight = 2;
-            for (int j = i - 1; have && j <= i + 1; j += 2) {
+            for (int j = i - 1; have[k] && j <= i + 1; j += 2) {
                 if (j >= 0 && j < kDynoBins && t.torque_max[j] >= 0) {
                     sum += t.torque_max[j];
                     weight += 1;
                 }
             }
             const float nm = sum / weight;
-            lv_chart_set_series_value_by_id(t.chart, t.torque_series, static_cast<uint32_t>(k),
-                                            have ? static_cast<int32_t>(roundf(torque_shown(nm)))
-                                                 : LV_CHART_POINT_NONE);
-            lv_chart_set_series_value_by_id(t.chart, t.power_series, static_cast<uint32_t>(k),
-                                            have ? static_cast<int32_t>(roundf(power_shown(nm, rpm)))
-                                                 : LV_CHART_POINT_NONE);
+            xs[k] = room + static_cast<float>(k * (t.chart_w - 1)) / static_cast<float>(kDynoShown - 1);
+            torque_y[k] = room + span * (1 - clampf(torque_shown(nm) / ttop, 0, 1));
+            power_y[k] = room + span * (1 - clampf(power_shown(nm, rpm) / ptop, 0, 1));
         }
-        lv_chart_refresh(t.chart);
+        if (t.plot) {
+            lv_draw_buf_t *b = t.plot_buf;
+            const int bw = static_cast<int>(b->header.w), bh = static_cast<int>(b->header.h);
+            const int stride = static_cast<int>(b->header.stride);
+            plot_clear(b->data, bh, stride);
+            // Torque, then power over it; a gap in the speeds seen ends a line.
+            for (int series = 0; series < 2; ++series) {
+                const float *ys = series ? power_y : torque_y;
+                for (int k = 0; k < kDynoShown;) {
+                    int end = k;
+                    while (end < kDynoShown && have[end]) {
+                        ++end;
+                    }
+                    if (end > k) {
+                        plot_line(b->data, bw, bh, stride, xs + k, ys + k, end - k, t.line_width,
+                                  series ? kPower : kAccent);
+                    }
+                    k = end + 1;
+                }
+            }
+            lv_obj_invalidate(t.plot);
+        }
         if (tbin >= 0) {
             snprintf(text, sizeof(text), "MAX  %.0f %s at %d   %.0f %s at %d", static_cast<double>(tmax),
                      unit_text(kTorque, g.units), kDynoFrom + tbin * kDynoStep, static_cast<double>(pmax),

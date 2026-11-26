@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "plot.hpp"
 #include "car_art.hpp"
 #include "channels.hpp"
 #include "defs.hpp"
@@ -423,6 +424,40 @@ void test_channel_table() {
 
 } // namespace
 
+void test_plot() {
+    enum { kW = 24, kH = 16 };
+    uint8_t image[kW * kH * 4];
+    gauges::plot_clear(image, kH, kW * 4);
+    // A level line three pixels wide: full on its row and the two beside it,
+    // nothing two rows away; its colour as given (B, G, R).
+    const float x[] = {2, 12, 21}, y[] = {8, 8, 8};
+    CHECK(gauges::plot_line(image, kW, kH, kW * 4, x, y, 3, 3.0f, 0x2EC5FF));
+    const uint8_t *on = image + (8 * kW + 10) * 4, *beside = image + (9 * kW + 10) * 4;
+    CHECK(on[3] == 255 && on[0] == 0xFF && on[1] == 0xC5 && on[2] == 0x2E);
+    CHECK(beside[3] == 255 && image[(10 * kW + 10) * 4 + 3] == 0 && image[(8 * kW + 23) * 4 + 3] == 0);
+    // Half a pixel lower: the rows above and below share it.
+    gauges::plot_clear(image, kH, kW * 4);
+    const float lower[] = {8.5f, 8.5f, 8.5f};
+    CHECK(gauges::plot_line(image, kW, kH, kW * 4, x, lower, 3, 1.0f, 0xFFFFFF));
+    CHECK_NEAR(image[(8 * kW + 10) * 4 + 3], 128, 2);
+    CHECK_NEAR(image[(9 * kW + 10) * 4 + 3], 128, 2);
+    // Between two points the curve stays between them, and a second line goes over the first.
+    gauges::plot_clear(image, kH, kW * 4);
+    const float step_y[] = {12, 12, 4};
+    CHECK(gauges::plot_line(image, kW, kH, kW * 4, x, step_y, 3, 1.0f, 0xFFFFFF));
+    for (int row = 13; row < kH; ++row) {
+        for (int col = 0; col < kW; ++col) {
+            CHECK(image[(row * kW + col) * 4 + 3] < 128 || row == 13);
+        }
+    }
+    CHECK(gauges::plot_line(image, kW, kH, kW * 4, x, y, 3, 3.0f, 0xFF0000));
+    CHECK(image[(8 * kW + 5) * 4 + 2] == 0xFF && image[(8 * kW + 5) * 4 + 0] == 0);
+    // One point is a dot.
+    gauges::plot_clear(image, kH, kW * 4);
+    CHECK(gauges::plot_line(image, kW, kH, kW * 4, x, y, 1, 3.0f, 0xFFFFFF));
+    CHECK(image[(8 * kW + 2) * 4 + 3] == 255 && image[(8 * kW + 6) * 4 + 3] == 0);
+}
+
 int main() {
     test_hsfz_frames();
     test_hsfz_ident();
@@ -436,6 +471,7 @@ int main() {
     test_channel_table();
     test_dpf();
     test_wheels();
+    test_plot();
     test_transmission();
     if (g_failures) {
         fprintf(stderr, "%d of %d checks failed\n", g_failures, g_checks);

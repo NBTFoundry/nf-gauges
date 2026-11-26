@@ -49,7 +49,7 @@ FONT_TTF := $(LVGL_PATH)/scripts/generators/built_in_font/Montserrat-Medium.ttf
 
 # --- Our sources ---
 CORE_SRC := src/channels.cpp src/units.cpp src/obd.cpp src/hsfz.cpp src/hsfz_link.cpp src/defs.cpp \
-	src/sources.cpp src/dme.cpp src/car_art.cpp
+	src/sources.cpp src/dme.cpp src/car_art.cpp src/plot.cpp
 SCREEN_SRC := src/ui.cpp src/display_gl.cpp
 APP_SRC := $(CORE_SRC) $(SCREEN_SRC) src/main.cpp
 GEN_SRC := $(GEN_DIR)/font.c $(GEN_DIR)/version.c
