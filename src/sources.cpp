@@ -128,6 +128,43 @@ float ease(float x) {
     return x * x * (3.0f - 2.0f * x);
 }
 
+// Full-load torque against engine speed, Nm: an M5's twin-turbo V8 (S63,
+// F90) as a dyno pull draws it, its ripple smoothed away. The turbos build to
+// 800 Nm by 2200 rpm, 824 Nm at 2900, a slow slope to 5750, then away:
+// 466 kW (626 hp) at 5900.
+const struct {
+    float rpm, nm;
+} kFullLoad[] = {
+    {900, 250},  {1300, 339}, {1500, 407}, {1750, 536}, {2000, 685}, {2150, 778}, {2300, 802}, {2600, 806},
+    {2900, 824}, {3200, 802}, {3600, 794}, {4000, 786}, {4400, 784}, {4800, 778}, {5200, 766}, {5500, 766},
+    {5750, 768}, {6000, 743}, {6200, 705}, {6400, 653}, {6600, 603}, {6850, 546}, {7000, 515}, {7300, 460},
+};
+const int kFullLoadPoints = static_cast<int>(sizeof(kFullLoad) / sizeof(kFullLoad[0]));
+
+// The slope at a point: the mean of the two segments beside it.
+float full_load_slope(int i) {
+    const int a = i > 0 ? i - 1 : i, b = i < kFullLoadPoints - 1 ? i + 1 : i;
+    return (kFullLoad[b].nm - kFullLoad[a].nm) / (kFullLoad[b].rpm - kFullLoad[a].rpm);
+}
+
+// A smooth curve through the points (cubic Hermite).
+float full_load(float rpm) {
+    if (rpm <= kFullLoad[0].rpm) {
+        return kFullLoad[0].nm;
+    }
+    if (rpm >= kFullLoad[kFullLoadPoints - 1].rpm) {
+        return kFullLoad[kFullLoadPoints - 1].nm;
+    }
+    int i = 0;
+    while (rpm > kFullLoad[i + 1].rpm) {
+        ++i;
+    }
+    const float h = kFullLoad[i + 1].rpm - kFullLoad[i].rpm, u = (rpm - kFullLoad[i].rpm) / h;
+    const float u2 = u * u, u3 = u2 * u;
+    return (2 * u3 - 3 * u2 + 1) * kFullLoad[i].nm + (u3 - 2 * u2 + u) * h * full_load_slope(i) +
+           (-2 * u3 + 3 * u2) * kFullLoad[i + 1].nm + (u3 - u2) * h * full_load_slope(i + 1);
+}
+
 } // namespace
 
 void demo_values(uint64_t t_ms, Store *store, uint64_t now_ms, bool diesel) {
@@ -145,8 +182,8 @@ void demo_values(uint64_t t_ms, Store *store, uint64_t now_ms, bool diesel) {
     } else if (t < 12.0f) {
         const float u = t - 4.0f;
         const float gear = u < 4.5f ? u / 4.5f : (u - 4.5f) / 3.5f;
-        // From just above idle to 7000 rpm, twice: the whole curve is drawn.
-        rpm = u < 4.5f ? 1000.0f + 6000.0f * ease(gear) : 4500.0f + 2500.0f * ease(gear);
+        // From idle to 7050 rpm, twice: the whole curve is drawn.
+        rpm = u < 4.5f ? 900.0f + 6150.0f * ease(gear) : 4600.0f + 2450.0f * ease(gear);
         load = clampf(u * 8.0f, 0.0f, 1.0f);
         pedal = 100.0f;
         speed = 135.0f * (1.0f - expf(-u / 4.5f)) / (1.0f - expf(-8.0f / 4.5f));
@@ -159,7 +196,7 @@ void demo_values(uint64_t t_ms, Store *store, uint64_t now_ms, bool diesel) {
         }
     } else if (t < 15.0f) {
         const float u = (t - 12.0f) / 3.0f;
-        rpm = 7000.0f - 4300.0f * ease(u);
+        rpm = 7050.0f - 4350.0f * ease(u);
         load = 0.0f;
         pedal = 0;
         speed = 135.0f - 50.0f * ease(u);
@@ -210,15 +247,7 @@ void demo_values(uint64_t t_ms, Store *store, uint64_t now_ms, bool diesel) {
     store->set(kTrimShort, 1.5f * sinf(t * 2.0f), kDemo, now_ms);
     store->set(kTrimLong, -2.3f, kDemo, now_ms);
     store->set(kVoltage, 14.2f + 0.1f * sinf(t * 0.5f), kDemo, now_ms);
-    // Full load as an M5's twin-turbo V8 (S63, F90) gives it: the turbos
-    // build to 750 Nm by 1800 rpm, flat to 5600, then 441 kW (600 PS) held to
-    // 6700 and a little less up to the limiter. The corner between the two is
-    // round, as on a dyno sheet.
-    const float held = 441000.0f * 60.0f / (2.0f * 3.14159265f * (rpm < 6700.0f ? rpm : 6700.0f));
-    const float knee = -30.0f * logf(expf(-750.0f / 30.0f) + expf(-held / 30.0f)); // the lower, softly
-    const float full = rpm < 1800.0f   ? 330.0f + (knee - 330.0f) * ease((rpm - 900.0f) / 900.0f)
-                       : rpm < 6700.0f ? knee
-                                       : knee * (1.0f - 0.12f * clampf((rpm - 6700.0f) / 500.0f, 0.0f, 1.0f));
+    const float full = full_load(rpm);
     const float torque = 15.0f + (full - 15.0f) * load;
     store->set(kTorque, torque, kDemo, now_ms);
     store->set(kSpeed, speed, kDemo, now_ms);

@@ -79,7 +79,10 @@ struct WheelView {
 };
 
 // Torque and power against engine speed: 1000 to 7500 rpm, every 100.
-enum { kDynoFrom = 1000, kDynoStep = 100, kDynoBins = 66 };
+// Recorded every 100 rpm; drawn every 200, each point with its neighbours: a line of
+// longer strokes, as a dyno sheet smooths its own.
+enum { kDynoFrom = 1000, kDynoStep = 100, kDynoBins = 65, kDynoShown = (kDynoBins + 1) / 2 };
+const uint64_t kDynoGapMs = 500; // two samples further apart are not joined
 
 struct TransmissionView {
     CarGeometry geo;
@@ -102,6 +105,9 @@ struct TransmissionView {
     lv_obj_t *cursor, *torque_dot, *power_dot, *now_text, *peak_text;
     int chart_x, chart_y, chart_w, chart_h;
     float torque_max[kDynoBins]; // Nm, -1 for none yet
+    float last_rpm, last_torque; // the sample before, to read the torque between two
+    uint64_t last_ms;
+    bool has_last;
     float torque_top, power_top; // the axes' tops, display units
     bool dyno_dirty;
     char now_buf[48], peak_buf[80];
@@ -736,7 +742,7 @@ const uint32_t kTyre = 0x0B0E12;
 const uint32_t kTyreEdge = 0x2E3946;
 const uint32_t kTread = 0x2A3644;
 const uint32_t kSplitRear = 0x16607C; // the accent, darker: the rear's part
-const uint32_t kPower = 0xA78BFA;     // the power curve
+const uint32_t kPower = 0xF2F5F8;     // the power curve: white beside the accent's torque
 
 lv_obj_t *shape(lv_obj_t *parent, int x, int y, int w, int h, int radius, uint32_t fill,
                 uint32_t border, int border_width) {
@@ -886,7 +892,7 @@ void build_dyno(lv_obj_t *page, int x, int w) {
     const int margin = g.width * 3 / 100;
     t.chart_x = x + margin;
     t.chart_y = ly + g.height * 7 / 100;
-    t.chart_w = w - 2 * margin;
+    t.chart_w = (w - 2 * margin) / (kDynoShown - 1) * (kDynoShown - 1) + 1; // whole pixels between points
     t.chart_h = content - t.chart_y - g.height * 21 / 100;
     t.chart = lv_chart_create(page);
     lv_obj_remove_style_all(t.chart);
@@ -894,7 +900,7 @@ void build_dyno(lv_obj_t *page, int x, int w) {
     lv_obj_set_pos(t.chart, t.chart_x, t.chart_y);
     lv_obj_set_size(t.chart, t.chart_w, t.chart_h);
     lv_chart_set_type(t.chart, LV_CHART_TYPE_LINE);
-    lv_chart_set_point_count(t.chart, kDynoBins);
+    lv_chart_set_point_count(t.chart, kDynoShown);
     lv_chart_set_div_line_count(t.chart, 3, 7);
     lv_obj_set_style_line_color(t.chart, lv_color_hex(kTrack), LV_PART_MAIN);
     lv_obj_set_style_line_width(t.chart, 1, LV_PART_MAIN);
@@ -911,9 +917,11 @@ void build_dyno(lv_obj_t *page, int x, int w) {
     for (int i = 0; i < 3; ++i) {
         const int y = t.chart_y + t.chart_h - (t.chart_h * i) / 2 - g.height * 17 / 1000;
         t.torque_labels[i] = label(page, g.fonts.tiny, kTextDim, "");
-        lv_obj_set_width(t.torque_labels[i], margin - 6);
+        // Four digits (1000 Nm) fit: the label starts in the page's margin.
+        lv_obj_set_width(t.torque_labels[i], margin - 6 + g.pad);
+        lv_label_set_long_mode(t.torque_labels[i], LV_LABEL_LONG_MODE_CLIP);
         lv_obj_set_style_text_align(t.torque_labels[i], LV_TEXT_ALIGN_RIGHT, 0);
-        lv_obj_set_pos(t.torque_labels[i], x, y);
+        lv_obj_set_pos(t.torque_labels[i], x - g.pad, y);
         t.power_labels[i] = label(page, g.fonts.tiny, kTextDim, "");
         lv_obj_set_pos(t.power_labels[i], t.chart_x + t.chart_w + 6, y);
     }
@@ -944,6 +952,7 @@ void build_dyno(lv_obj_t *page, int x, int w) {
         t.torque_max[i] = -1.0f;
     }
     t.torque_top = t.power_top = 0;
+    t.has_last = false;
     t.dyno_dirty = true;
     t.now_buf[0] = t.peak_buf[0] = '\0';
 }
@@ -1222,31 +1231,52 @@ float torque_shown(float nm) {
     return to_display(kTorque, nm, g.units);
 }
 
+// Horsepower, as dyno sheets and drivers count it: metric (PS) with metric
+// units, mechanical with imperial ones.
 float power_shown(float nm, float rpm) {
     const float kw = nm * rpm / 9549.3f;
-    return g.units.imperial ? kw * 1.341022f : kw;
+    return kw * (g.units.imperial ? 1.341022f : 1.359622f);
 }
 
 float nice_top(float v, float step, float least) {
-    const float top = ceilf(v * 1.12f / step) * step;
+    const float top = ceilf(v * 1.08f / step) * step;
     return top < least ? least : top;
 }
 
-// Every frame, whatever the page: the most torque seen at this engine speed.
+// Every frame, whatever the page: the most torque seen at each engine speed.
+// The curves' points are at the hundreds of rpm: the torque there is read
+// between two successive samples, so a pull draws a smooth line wherever the
+// samples fall, and no speed is skipped when the engine revs fast.
 void dyno_record(const UiInput &in) {
     TransmissionView &t = g.tm;
     const Sample &rpm = in.samples[kRpm];
     const Sample &tq = in.samples[kTorque];
     if (!fresh(rpm, in.now_ms) || !fresh(tq, in.now_ms) || tq.value <= 0) {
+        t.has_last = false;
         return;
     }
-    const int bin = static_cast<int>(roundf((rpm.value - kDynoFrom) / kDynoStep));
-    if (bin < 0 || bin >= kDynoBins) {
+    // Not across a gap, nor across a step in the torque (the pedal going down
+    // or up, a shift): what lies between the two was never delivered.
+    const float r0 = t.last_rpm, q0 = t.last_torque;
+    const bool joined = t.has_last && in.now_ms - t.last_ms <= kDynoGapMs &&
+                        (q0 < tq.value ? q0 >= 0.6f * tq.value : tq.value >= 0.6f * q0);
+    t.last_rpm = rpm.value;
+    t.last_torque = tq.value;
+    t.last_ms = in.now_ms;
+    t.has_last = true;
+    if (!joined || r0 == rpm.value) {
         return;
     }
-    if (tq.value > t.torque_max[bin]) {
-        t.torque_max[bin] = tq.value;
-        t.dyno_dirty = true;
+    const float lo = r0 < rpm.value ? r0 : rpm.value, hi = r0 < rpm.value ? rpm.value : r0;
+    int bin = static_cast<int>(ceilf((lo - kDynoFrom) / kDynoStep));
+    const int last = static_cast<int>(floorf((hi - kDynoFrom) / kDynoStep));
+    for (bin = bin < 0 ? 0 : bin; bin <= last && bin < kDynoBins; ++bin) {
+        const float at = static_cast<float>(kDynoFrom + bin * kDynoStep);
+        const float value = q0 + (tq.value - q0) * (at - r0) / (rpm.value - r0);
+        if (value > t.torque_max[bin]) {
+            t.torque_max[bin] = value;
+            t.dyno_dirty = true;
+        }
     }
 }
 
@@ -1294,24 +1324,34 @@ void update_dyno(const UiInput &in) {
             }
             snprintf(text, sizeof(text), "TORQUE  %s", unit_text(kTorque, g.units));
             lv_label_set_text(t.torque_legend, text);
-            snprintf(text, sizeof(text), "POWER  %s", g.units.imperial ? "hp" : "kW");
+            snprintf(text, sizeof(text), "%s", "POWER  hp");
             lv_label_set_text(t.power_legend, text);
         }
-        for (int i = 0; i < kDynoBins; ++i) {
+        for (int k = 0; k < kDynoShown; ++k) {
+            const int i = 2 * k;
             const float rpm = static_cast<float>(kDynoFrom + i * kDynoStep);
             const bool have = t.torque_max[i] >= 0;
-            lv_chart_set_series_value_by_id(t.chart, t.torque_series, static_cast<uint32_t>(i),
-                                            have ? static_cast<int32_t>(roundf(torque_shown(t.torque_max[i])))
+            // The point and what its two neighbours saw, 1:2:1.
+            float sum = 2 * t.torque_max[i], weight = 2;
+            for (int j = i - 1; have && j <= i + 1; j += 2) {
+                if (j >= 0 && j < kDynoBins && t.torque_max[j] >= 0) {
+                    sum += t.torque_max[j];
+                    weight += 1;
+                }
+            }
+            const float nm = sum / weight;
+            lv_chart_set_series_value_by_id(t.chart, t.torque_series, static_cast<uint32_t>(k),
+                                            have ? static_cast<int32_t>(roundf(torque_shown(nm)))
                                                  : LV_CHART_POINT_NONE);
-            lv_chart_set_series_value_by_id(t.chart, t.power_series, static_cast<uint32_t>(i),
-                                            have ? static_cast<int32_t>(roundf(power_shown(t.torque_max[i], rpm)))
+            lv_chart_set_series_value_by_id(t.chart, t.power_series, static_cast<uint32_t>(k),
+                                            have ? static_cast<int32_t>(roundf(power_shown(nm, rpm)))
                                                  : LV_CHART_POINT_NONE);
         }
         lv_chart_refresh(t.chart);
         if (tbin >= 0) {
             snprintf(text, sizeof(text), "MAX  %.0f %s at %d   %.0f %s at %d", static_cast<double>(tmax),
                      unit_text(kTorque, g.units), kDynoFrom + tbin * kDynoStep, static_cast<double>(pmax),
-                     g.units.imperial ? "hp" : "kW", kDynoFrom + pbin * kDynoStep);
+                     "hp", kDynoFrom + pbin * kDynoStep);
         } else {
             snprintf(text, sizeof(text), "%s", "The curves fill as the engine runs.");
         }
@@ -1324,7 +1364,7 @@ void update_dyno(const UiInput &in) {
     if (ok) {
         const float tv = torque_shown(tq.value), pv = power_shown(tq.value, rpm.value);
         snprintf(text, sizeof(text), "%.0f %s   %.0f %s", static_cast<double>(tv), unit_text(kTorque, g.units),
-                 static_cast<double>(pv), g.units.imperial ? "hp" : "kW");
+                 static_cast<double>(pv), "hp");
         const float f = clampf((rpm.value - kDynoFrom) / static_cast<float>((kDynoBins - 1) * kDynoStep), 0, 1);
         const int dot = lv_obj_get_width(t.torque_dot);
         const int x = t.chart_x + static_cast<int>(f * static_cast<float>(t.chart_w - 1));
