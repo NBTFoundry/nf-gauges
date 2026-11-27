@@ -98,6 +98,9 @@ make qnx qnx-check vm-test      # head unit build, QNX 6.5 checks
 make anims                      # docs/screens/*.webp
 ```
 
+CI and `vX.Y.Z` releases build against the SDK commit in `release/sdk.ref`:
+[SDK 0.2.0](https://github.com/NBTFoundry/sdk/releases/tag/v0.2.0).
+
 ## License
 
 MPL-2.0. Third-party notices (LVGL, Tiny TTF, Montserrat, SDK) in
