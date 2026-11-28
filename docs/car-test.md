@@ -27,7 +27,7 @@ unit's own link? The CONNECTION page shows it.
 | B3 | Read the status at the top right | One of: **DME nn HZ** (green: the DME answers), **IDRIVE CAR DATA** (amber), **SEARCHING** (no gateway answered), **CONNECTING** (a gateway, but no DME yet). GATEWAY on CONNECTION: **NBT Manager** (through its diagnostics); LAST PROBLEM says why when it waits |
 | B4 | If **DME**: the TEMPERATURES page | Coolant and oil close to the car's own (oil may be `--` if the DME does not give it) |
 | B5 | The fourth page | A petrol car: **IGNITION** (timing gauge). A diesel: **DPF** (soot load gauge, REGENERATION, PRESSURE DROP, FILTER INLET/OUTLET...). Note which, and **take a photo** if DPF |
-| B6 | The fifth page, **TRANSMISSION** | The car drawn from above; GEAR shows **P** (and the drive mode, e.g. COMFORT); wheel speeds `--` and a note about definition files (none installed); DRIVE: REAR-WHEEL DRIVE (Drivetrain: auto, no definition file) |
+| B6 | The fifth page, **TRANSMISSION** | The car drawn from above; GEAR shows **P** (and the drive mode, e.g. COMFORT); wheel speeds `--` and a note about definition files (none installed); DRIVE: SET IT IN SETTINGS (Drivetrain: auto, no definition file); REAR-WHEEL DRIVE with Drivetrain: rwd |
 | B7 | Foot on the brake, the selector to **R**, **N**, **D**, back to **P** | GEAR follows: R, N, D1 (or S1 in Sport), P. If a letter is wrong, note what the selector was on |
 
 ## C. Engine running (parked)

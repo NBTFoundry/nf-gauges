@@ -97,6 +97,7 @@ struct TransmissionView {
     int front_opa, rear_opa;
     Drivetrain drivetrain; // the setting
     int xdrive;            // drawn with the front axle driven (1) or not (0); -1 not yet
+    int drive_known;       // 1 set or seen, 0 automatic with nothing seen yet; -1 not yet
     bool xdrive_seen;      // the split or the transfer case answered
     float steer_shown;
     bool has_steer;
@@ -836,7 +837,7 @@ void build_car(lv_obj_t *page, int length) {
     t.transfer = shape(page, mid - gb_w / 2, t.car_y + geo.gearbox_bottom - lw * 4, gb_w + lw * 2, lw * 4,
                        lw, kBackground, kAccent, 2);
     t.front_opa = t.rear_opa = -1;
-    t.xdrive = -1;
+    t.xdrive = t.drive_known = -1;
     // The wheels, the front ones steering; tread across each.
     for (int i = 0; i < 4; ++i) {
         WheelView &wv = t.wheels[i];
@@ -1133,12 +1134,22 @@ bool xdrive_now(const UiInput &in) {
     return t.drivetrain == kDriveXdrive || (t.drivetrain == kDriveAuto && t.xdrive_seen);
 }
 
+// Automatic says nothing until the transfer case or the split answers: the
+// car data alone cannot tell xDrive from rear-wheel drive.
+bool drive_known() {
+    const TransmissionView &t = g.tm;
+    return t.drivetrain != kDriveAuto || t.xdrive_seen;
+}
+
 void show_drivetrain(bool xdrive) {
     TransmissionView &t = g.tm;
-    if (t.xdrive == (xdrive ? 1 : 0)) {
+    const int known = drive_known() ? 1 : 0;
+    if (t.xdrive == (xdrive ? 1 : 0) && t.drive_known == known) {
         return;
     }
     t.xdrive = xdrive ? 1 : 0;
+    t.drive_known = known;
+    lv_label_set_text(t.rwd, known ? "REAR-WHEEL DRIVE" : "SET IT IN SETTINGS");
     lv_obj_t *front[] = {t.front_shaft, t.front_axle, t.front_diff, t.transfer, t.front_label,
                          t.rear_label, t.front_value, t.rear_value, t.clutch};
     for (size_t i = 0; i < sizeof(front) / sizeof(front[0]); ++i) {

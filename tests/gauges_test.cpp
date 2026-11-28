@@ -394,6 +394,13 @@ void test_transmission() {
     CHECK(car_data_value(kGear, 7, &v) && v == 3);
     CHECK(!car_data_value(kAccelLong, 65535.0, &v));
     CHECK(car_data_value(kAccelLat, -2.5, &v) && v == -2.5f);
+    // Engine off (G31): not-available values are left out.
+    CHECK(!car_data_value(kRpm, 65535.0, &v) && !car_data_value(kTorque, 1024.0, &v));
+    CHECK(!car_data_value(kPedal, 4095.0, &v) && !car_data_value(kSteering, 65535.0, &v));
+    CHECK(!car_data_value(kSpeed, 65535.0, &v) && !car_data_value(kCoolant, 255.0, &v));
+    CHECK(car_data_value(kRpm, 780.0, &v) && v == 780.0f);
+    CHECK(car_data_value(kTorque, -45.0, &v) && v == -45.0f);
+    CHECK(car_data_value(kPedal, 100.0, &v) && car_data_value(kSteering, -540.0, &v));
     // The car's image: opaque paint in the middle, clear in the corners, the
     // wheels' and gearbox's places within it.
     const CarGeometry geo = car_geometry(405);

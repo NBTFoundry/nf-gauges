@@ -50,18 +50,44 @@ bool json_number(const char *text, const char *key, double *out) {
 }
 
 bool car_data_value(int channel, double raw, float *out) {
+    // iDrive passes on what the bus says when a value is not available: the
+    // field's highest number. With the engine off a G31 (2026-11-28) gives
+    // 65535 rpm, 1024 Nm, pedal 4095 and steering 65535 degrees.
+    double low = -1e9, high = 1e9;
     switch (channel) {
     case kGear:
         return car_data_gear(static_cast<int>(raw), out);
     case kAccelLat:
     case kAccelLong:
-        // 65535 when the car has none.
-        if (raw > 650.0 || raw < -650.0) {
-            return false;
-        }
+        low = -650.0, high = 650.0; // 65535 when the car has none
+        break;
+    case kRpm:
+        low = 0.0, high = 12000.0;
+        break;
+    case kTorque:
+        low = -1000.0, high = 1000.0;
+        break;
+    case kPedal:
+        low = 0.0, high = 100.0;
+        break;
+    case kSpeed:
+        low = 0.0, high = 400.0;
+        break;
+    case kSteering:
+        low = -1000.0, high = 1000.0;
+        break;
+    case kCoolant:
+    case kOil:
+        low = -60.0, high = 254.0; // 255 when not available
+        break;
+    case kAmbient:
+        low = -60.0, high = 80.0;
         break;
     default:
         break;
+    }
+    if (raw < low || raw > high) {
+        return false;
     }
     *out = static_cast<float>(raw);
     return true;

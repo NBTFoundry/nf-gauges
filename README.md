@@ -69,7 +69,7 @@ curves), BACK to close.
 | Units | metric, imperial |
 | Lambda as | lambda, afr |
 | Boost gauge top | 1 to 3 bar |
-| Drivetrain | auto, rwd, xdrive |
+| Drivetrain | auto (xDrive once the transfer case answers, else asks), rwd, xdrive |
 | Debug log | off, on |
 
 ## Definition files
